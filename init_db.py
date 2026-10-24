@@ -1,0 +1,451 @@
+import sys
+import os
+import sqlite3
+from pathlib import Path
+from config import Config
+import database
+
+DEMO_USERS = [
+    (1, 'Dr. Rajesh Kumar (Estate Director)', 'admin@campus.edu',
+     'scrypt:32768:8:1$akQ8e2JjwUYqvC8W$32457d47a85d6b61aaa81fd001f9113ad40c0366fb904375df332787cec528c2cf45a867a164cabe4c88d79fb49fcf6c599054e70742bb6233a0e4bbce82ce23',
+     'Admin', '+91 98480 12345', 'Infrastructure & Maintenance Office'),
+    (2, 'Venkatesh Rao (Lead Field Engineer)', 'staff@campus.edu',
+     'scrypt:32768:8:1$YLj6D6ttF2aoA7DB$c93e90b99e5ca6e9ef5a4acf70c889414b96e31da763d1ff359e5c289c16a9bafbb4a4e761a28dd0765b85687bfa20df2ae0d9ab567844c737b249d723e2ae66',
+     'Maintenance Staff', '+91 98480 56789', 'Campus Physical Plant Team'),
+    (3, 'Prof. Sunita Sharma (Campus Observer)', 'viewer@campus.edu',
+     'scrypt:32768:8:1$t1juxbBS4vG4WVyx$ae4457ba19bdd418cd3b12ab81147ddd6bbb2f68b3920fd527b03d7ec0064ea470440443a0589685f85ceb1988b086a722c1c280329ab9bd904f32e0583747f7',
+     'Viewer', '+91 98480 99887', 'Academic Council Representative')
+]
+
+DEMO_SURVEYS = [
+    (1, 'Campus Infrastructure Health & AI Survey 2026',
+     'Annual evaluation of roads, streetlights, water supply, drainage and AI preventive monitoring feedback from students and faculty.',
+     1)
+]
+
+# Assets tuples (SRGEC Campus Coordinates: ~16.350975, 81.042576):
+# (id, asset_tag, asset_type, name, location, lat, lng, health_score, condition_status, age_years, prev_failures, complaint_count, maintenance_count, last_inspection, next_maintenance)
+DEMO_ASSETS = [
+    # Streetlights (id 1-22)
+    (1, 'SL-001', 'streetlight', 'LED Pole 01 - Main Gate Entrance', 'Main Campus Gate', 16.350794, 81.042508, 95, 'Good', 1, 0, 0, 0, '2026-09-01', '2026-12-01'),
+    (2, 'SL-002', 'streetlight', 'LED Pole 02 - Admin Block Avenue', 'Administrative Block Avenue', 16.351054, 81.042738, 92, 'Good', 2, 0, 1, 1, '2026-08-25', '2026-11-25'),
+    (3, 'SL-003', 'streetlight', 'LED Pole 03 - Central Library North', 'Library North Walkway', 16.351354, 81.042238, 88, 'Good', 2, 1, 0, 1, '2026-08-10', '2026-11-10'),
+    (4, 'SL-004', 'streetlight', 'LED Pole 04 - Engineering Block B', 'Computer Science Quad', 16.351554, 81.042938, 78, 'Moderate', 3, 2, 2, 2, '2026-07-15', '2026-10-15'),
+    (5, 'SL-005', 'streetlight', 'LED Pole 05 - Boys Hostel Road', 'Hostel Zone Circle', 16.351954, 81.042038, 42, 'Poor', 5, 4, 5, 3, '2026-06-20', '2026-09-27'),
+    (6, 'SL-006', 'streetlight', 'LED Pole 06 - Sports Ground West', 'Cricket Pavilion Walkway', 16.350254, 81.041638, 31, 'Critical', 6, 6, 7, 4, '2026-06-11', '2026-09-22'),
+    (7, 'SL-007', 'streetlight', 'LED Pole 07 - Cafeteria Plaza', 'Central Food Court', 16.350654, 81.043338, 96, 'Good', 1, 0, 0, 0, '2026-09-05', '2026-12-05'),
+    (8, 'SL-008', 'streetlight', 'LED Pole 08 - Girls Hostel Avenue', 'East Hostel Lane', 16.352254, 81.043138, 68, 'Moderate', 3, 1, 3, 2, '2026-08-01', '2026-10-01'),
+    (9, 'SL-009', 'streetlight', 'LED Pole 09 - Science Lab Complex', 'Biotech Building Front', 16.350854, 81.041838, 84, 'Good', 2, 0, 1, 1, '2026-08-18', '2026-11-18'),
+    (10, 'SL-010', 'streetlight', 'LED Pole 10 - Mechanical Workshop', 'Workshop Perimeter', 16.349954, 81.042338, 52, 'Poor', 4, 3, 4, 3, '2026-07-22', '2026-10-05'),
+    (11, 'SL-011', 'streetlight', 'LED Pole 11 - Auditorium Boulevard', 'Convocation Hall Front', 16.350454, 81.042838, 90, 'Good', 1, 0, 0, 0, '2026-09-12', '2026-12-12'),
+    (12, 'SL-012', 'streetlight', 'LED Pole 12 - South Gate Checkpoint', 'South Campus Exit', 16.349554, 81.043038, 38, 'Critical', 5, 5, 6, 4, '2026-05-30', '2026-09-25'),
+    (13, 'SL-013', 'streetlight', 'LED Pole 13 - Innovation & Research Park', 'Tech Incubator Garden', 16.351654, 81.043638, 94, 'Good', 1, 0, 0, 0, '2026-09-08', '2026-12-08'),
+    (14, 'SL-014', 'streetlight', 'LED Pole 14 - Medical Center Junction', 'Health Center Crossing', 16.351854, 81.042638, 74, 'Moderate', 2, 1, 2, 1, '2026-08-14', '2026-11-14'),
+    (15, 'SL-015', 'streetlight', 'LED Pole 15 - Guest House Lane', 'VIP Guest Quarters', 16.351154, 81.041338, 91, 'Good', 1, 0, 0, 0, '2026-08-28', '2026-11-28'),
+    (16, 'SL-016', 'streetlight', 'LED Pole 16 - Indoor Stadium Court', 'Basketball Court North', 16.350154, 81.041038, 62, 'Moderate', 3, 2, 3, 2, '2026-07-19', '2026-10-19'),
+    (17, 'SL-017', 'streetlight', 'LED Pole 17 - Staff Quarters Block 1', 'Faculty Housing Sector A', 16.352454, 81.041838, 82, 'Good', 2, 1, 1, 1, '2026-08-22', '2026-11-22'),
+    (18, 'SL-018', 'streetlight', 'LED Pole 18 - Staff Quarters Block 2', 'Faculty Housing Sector B', 16.352654, 81.042138, 48, 'Poor', 4, 3, 4, 2, '2026-06-25', '2026-09-30'),
+    (19, 'SL-019', 'streetlight', 'LED Pole 19 - Parking Bay East', 'Central Vehicle Parking', 16.350554, 81.042038, 89, 'Good', 2, 0, 1, 1, '2026-09-02', '2026-12-02'),
+    (20, 'SL-020', 'streetlight', 'LED Pole 20 - Electrical Substation', 'Primary Power Yard', 16.349754, 81.042638, 35, 'Critical', 5, 4, 6, 3, '2026-05-18', '2026-09-23'),
+    (21, 'SL-021', 'streetlight', 'LED Pole 21 - Solar Farm Perimeter', 'Renewable Energy Wing', 16.349254, 81.041838, 87, 'Good', 2, 1, 0, 1, '2026-08-16', '2026-11-16'),
+    (22, 'SL-022', 'streetlight', 'LED Pole 22 - Lakeside Promenade', 'Campus Lake South Bank', 16.351254, 81.044038, 76, 'Moderate', 3, 2, 2, 2, '2026-07-29', '2026-10-29'),
+    # Roads (id 23-34)
+    (23, 'RD-001', 'road', 'Main Entrance Boulevard', 'Main Gate to Admin Quad', 16.350904, 81.042588, 94, 'Good', 1, 0, 0, 1, '2026-09-02', '2026-12-02'),
+    (24, 'RD-002', 'road', 'University Central Spine Road', 'Admin to Library Connector', 16.351204, 81.042488, 86, 'Good', 2, 1, 1, 1, '2026-08-20', '2026-11-20'),
+    (25, 'RD-003', 'road', 'Engineering Ring Road East', 'Behind CS and IT Blocks', 16.351504, 81.043188, 72, 'Moderate', 3, 2, 3, 2, '2026-07-18', '2026-10-18'),
+    (26, 'RD-004', 'road', 'Hostel Transit Lane', 'North Student Residential Sector', 16.352104, 81.042438, 39, 'Critical', 5, 5, 7, 3, '2026-06-15', '2026-09-24'),
+    (27, 'RD-005', 'road', 'Sports Complex Access Way', 'Stadium Outer Ring', 16.350404, 81.041338, 78, 'Moderate', 2, 1, 1, 1, '2026-08-05', '2026-11-05'),
+    (28, 'RD-006', 'road', 'Workshop Heavy Haul Track', 'Behind Mechanical Fabrication Lab', 16.349854, 81.042138, 48, 'Poor', 4, 3, 5, 2, '2026-06-29', '2026-09-29'),
+    (29, 'RD-007', 'road', 'Cafeteria Pedestrian Way', 'Central Food Plaza Circle', 16.350704, 81.043138, 92, 'Good', 1, 0, 0, 1, '2026-09-10', '2026-12-10'),
+    (30, 'RD-008', 'road', 'Research Park Link Road', 'Biotech to Nanotech Facility', 16.351604, 81.043888, 89, 'Good', 2, 0, 1, 1, '2026-08-26', '2026-11-26'),
+    (31, 'RD-009', 'road', 'South Gate Freight Corridor', 'Logistics Terminal to Store', 16.349504, 81.042788, 34, 'Critical', 6, 6, 8, 4, '2026-05-22', '2026-09-21'),
+    (32, 'RD-010', 'road', 'Faculty Housing Internal Lane', 'Sector A Staff Enclave', 16.352604, 81.041988, 81, 'Good', 2, 1, 1, 1, '2026-08-12', '2026-11-12'),
+    (33, 'RD-011', 'road', 'Lake View Circular Drive', 'Waterfront Jogging & Service Path', 16.351404, 81.044288, 65, 'Moderate', 3, 2, 3, 2, '2026-07-25', '2026-10-25'),
+    (34, 'RD-012', 'road', 'Auditorium North Crescent', 'Behind Convocation Lawn', 16.350354, 81.043088, 88, 'Good', 2, 0, 0, 0, '2026-09-04', '2026-12-04'),
+]
+
+# (asset_id, pole_number, wattage, power_status, light_status, lumens)
+DEMO_STREETLIGHTS = [
+    (1, 'POL-01', 70, 'ON', 'Working', 7000),
+    (2, 'POL-02', 70, 'ON', 'Working', 6800),
+    (3, 'POL-03', 70, 'ON', 'Working', 6500),
+    (4, 'POL-04', 90, 'ON', 'Flickering', 5200),
+    (5, 'POL-05', 90, 'ON', 'Faulty', 2800),
+    (6, 'POL-06', 70, 'OFF', 'Power Off', 0),
+    (7, 'POL-07', 70, 'ON', 'Working', 7200),
+    (8, 'POL-08', 70, 'ON', 'Flickering', 5100),
+    (9, 'POL-09', 70, 'ON', 'Working', 6700),
+    (10, 'POL-10', 90, 'ON', 'Maintenance Required', 3400),
+    (11, 'POL-11', 70, 'ON', 'Working', 7100),
+    (12, 'POL-12', 90, 'OFF', 'Faulty', 0),
+    (13, 'POL-13', 70, 'ON', 'Working', 7000),
+    (14, 'POL-14', 70, 'ON', 'Working', 6100),
+    (15, 'POL-15', 70, 'ON', 'Working', 6900),
+    (16, 'POL-16', 90, 'ON', 'Flickering', 4600),
+    (17, 'POL-17', 70, 'ON', 'Working', 6400),
+    (18, 'POL-18', 70, 'ON', 'Maintenance Required', 3300),
+    (19, 'POL-19', 70, 'ON', 'Working', 6800),
+    (20, 'POL-20', 120, 'OFF', 'Power Off', 0),
+    (21, 'POL-21', 70, 'ON', 'Working', 6600),
+    (22, 'POL-22', 70, 'ON', 'Working', 6000),
+]
+
+# (asset_id, road_name, length_km, surface_type, pothole_count, crack_severity, road_condition, priority)
+DEMO_ROADS = [
+    (23, 'Main Entrance Boulevard', 1.20, 'Asphalt', 0, 'None', 'Good', 'Low'),
+    (24, 'University Central Spine Road', 2.10, 'Asphalt', 1, 'Minor', 'Good', 'Low'),
+    (25, 'Engineering Ring Road East', 1.80, 'Concrete', 3, 'Moderate', 'Moderate', 'Medium'),
+    (26, 'Hostel Transit Lane', 1.50, 'Asphalt', 9, 'Severe', 'Critical', 'Urgent'),
+    (27, 'Sports Complex Access Way', 0.90, 'Paver Blocks', 1, 'Minor', 'Moderate', 'Medium'),
+    (28, 'Workshop Heavy Haul Track', 1.10, 'Concrete', 6, 'Severe', 'Poor', 'High'),
+    (29, 'Cafeteria Pedestrian Way', 0.60, 'Paver Blocks', 0, 'None', 'Good', 'Low'),
+    (30, 'Research Park Link Road', 1.40, 'Asphalt', 1, 'Minor', 'Good', 'Low'),
+    (31, 'South Gate Freight Corridor', 1.30, 'Asphalt', 12, 'Severe', 'Critical', 'Urgent'),
+    (32, 'Faculty Housing Internal Lane', 0.80, 'Concrete', 1, 'Minor', 'Good', 'Low'),
+    (33, 'Lake View Circular Drive', 1.70, 'Asphalt', 4, 'Moderate', 'Moderate', 'Medium'),
+    (34, 'Auditorium North Crescent', 0.70, 'Concrete', 0, 'None', 'Good', 'Low'),
+]
+
+# (id, maintenance_code, asset_id, problem, priority, assigned_staff_id, created_date, due_date, status, notes)
+DEMO_MAINTENANCE = [
+    (1, 'MNT-2026-001', 6, 'Luminaire burnt out; driver circuit failed', 'Urgent', 2, '2026-09-10', '2026-09-22', 'In Progress', 'Replacement Philips 70W LED unit requested from warehouse.'),
+    (2, 'MNT-2026-002', 12, 'Loose wiring causing total power failure at south checkpoint', 'Urgent', 2, '2026-09-11', '2026-09-21', 'Assigned', 'Safety hazard during night shifts. Scheduled bucket truck.'),
+    (3, 'MNT-2026-003', 26, 'Multiple large potholes near Boys Hostel entrance causing scooter skid risk', 'Urgent', 2, '2026-09-12', '2026-09-24', 'In Progress', 'Cold mix asphalt patching initiated. 4 potholes filled.'),
+    (4, 'MNT-2026-004', 31, 'Severe surface cracking and aggregate depression along freight road', 'High', 2, '2026-09-13', '2026-09-26', 'Pending', 'Heavy delivery vehicles diverted to auxiliary lane.'),
+    (9, 'MNT-2026-009', 5, 'Intermittent flicker in LED array and voltage fluctuations', 'High', 2, '2026-09-16', '2026-09-27', 'Pending', 'Check ballast capacitor and neutral ground.'),
+    (10, 'MNT-2026-010', 20, 'Circuit breaker tripping continuously at substation pole', 'High', 2, '2026-09-17', '2026-09-25', 'Pending', 'High priority electrical inspection needed.'),
+    (11, 'MNT-2026-011', 28, 'Deep rutting and surface subsidence on workshop access track', 'Medium', 2, '2026-09-17', '2026-09-30', 'Pending', 'Requires leveling and concrete sub-base reinforcment.'),
+    (15, 'MNT-2026-015', 4, 'Photocell sensor malfunctioning; light remains on in daytime', 'Low', 2, '2026-09-19', '2026-10-05', 'Pending', 'Photocell replacement needed to conserve energy.'),
+    (16, 'MNT-2026-016', 1, 'Routine quarterly LED cleaning and luminaire check', 'Low', 2, '2026-08-20', '2026-08-22', 'Completed', 'Glass cleaned, luminaire test passed at 98% efficiency.'),
+    (17, 'MNT-2026-017', 2, 'Tightened terminal screws and checked waterproof casing', 'Low', 2, '2026-08-15', '2026-08-16', 'Completed', 'Weatherproof seal intact.'),
+    (18, 'MNT-2026-018', 23, 'Kerb repainting and minor sealant application on road edge', 'Low', 2, '2026-08-10', '2026-08-12', 'Completed', 'Reflective yellow marking completed.'),
+]
+
+# (id, asset_id, alert_type, problem, risk_level, recommended_action, status, created_at)
+DEMO_ALERTS = [
+    (1, 6, 'Critical', 'Streetlight SL-006 is predicted to fail soon due to rapid voltage drops and aging driver.', 'High Risk', 'Replace driver capacitor and LED module within 48 hours.', 'In Progress', '2026-09-18 10:15:00'),
+    (2, 12, 'Critical', 'Streetlight SL-012 power supply intermittent; high failure probability in 3 days.', 'High Risk', 'Dispatch bucket truck for cable reconnection.', 'Pending', '2026-09-19 08:30:00'),
+    (3, 20, 'Critical', 'Streetlight SL-020 electrical surge risk near main substation yard.', 'High Risk', 'Inspect surge protection unit and transformer junction.', 'Pending', '2026-09-19 14:20:00'),
+    (4, 26, 'Critical', 'Road RD-004 severe surface deterioration index exceeded critical threshold (9 potholes).', 'High Risk', 'Initiate emergency bitumen patching and place warning cones.', 'In Progress', '2026-09-17 11:45:00'),
+    (5, 31, 'Critical', 'Road RD-009 freight route fatigue breakdown predicted within 7 days.', 'High Risk', 'Overlay 50mm bitumen binder course and restrict overload trucks.', 'Pending', '2026-09-18 16:00:00'),
+    (10, 5, 'Warning', 'Streetlight SL-005 flickering pattern indicates capacitor degradation.', 'Medium Risk', 'Schedule driver replacement during upcoming routine cycle.', 'Pending', '2026-09-18 19:25:00'),
+    (11, 10, 'Warning', 'Streetlight SL-010 optical luminaire degradation (>40% lumen loss).', 'Medium Risk', 'Clean refractor glass and test ballast voltage.', 'Pending', '2026-09-17 18:10:00'),
+    (12, 18, 'Warning', 'Streetlight SL-018 wiring resistance fluctuation in faculty sector.', 'Medium Risk', 'Inspect underground cable conduit for moisture ingress.', 'Pending', '2026-09-16 20:05:00'),
+    (13, 28, 'Warning', 'Road RD-006 surface micro-cracks spreading under heavy load.', 'Medium Risk', 'Apply bitumen emulsion crack seal before monsoon.', 'Pending', '2026-09-15 15:50:00'),
+    (18, 4, 'Maintenance', 'Streetlight SL-004 dusk-to-dawn photocell sensor timer drift.', 'Low Risk', 'Recalibrate digital optical sensor.', 'Pending', '2026-09-15 17:00:00'),
+]
+
+# (survey_id, respondent_name, respondent_role, streetlights_working, streetlights_flickering, roads_potholes, roads_maintenance_needed, water_leakage_observed, water_supply_regular, drainage_blocked, drainage_flow_ok, maintenance_satisfaction, maintenance_timely, ai_monitoring_useful, ai_would_use, comments)
+DEMO_SURVEY_RESPONSES = [
+    (1, 'Aarav Sharma', 'Student', 'Mostly', 'A Few', 'Minor', 'Yes', 'None', 'Yes', 'None', 'Good', 4, 'Usually', 'Extremely', 'Definitely', 'Hostel road potholes need quick fixing, especially near Block 2.'),
+    (1, 'Pooja Reddy', 'Student', 'Yes', 'None', 'None', 'No', 'None', 'Yes', 'None', 'Good', 5, 'Always', 'Extremely', 'Definitely', 'Streetlights near the library and main gate are bright and safe at night.'),
+    (1, 'Dr. M. Srinivasan', 'Faculty', 'Mostly', 'A Few', 'Minor', 'Yes', 'None', 'Yes', 'None', 'Good', 4, 'Usually', 'Very', 'Definitely', 'AI predictive alerts will save significant college maintenance expenditure.'),
+    (1, 'Rohan Verma', 'Student', 'No', 'Many', 'Severe', 'Yes', 'None', 'Yes', 'None', 'Good', 2, 'Rarely', 'Extremely', 'Definitely', 'Boys hostel road needs repaving.'),
+    (1, 'Sneha Patel', 'Student', 'Mostly', 'A Few', 'Minor', 'No', 'None', 'Yes', 'None', 'Good', 4, 'Usually', 'Extremely', 'Definitely', 'A live status map makes it easy to see which routes are well-lit.'),
+    (1, 'Prof. Anita Deshmukh', 'Faculty', 'Yes', 'None', 'None', 'No', 'None', 'Yes', 'None', 'Good', 5, 'Always', 'Very', 'Definitely', 'Very impressive initiative for digital smart campus management.'),
+    (1, 'Kiran Kumar', 'Staff', 'Mostly', 'A Few', 'Minor', 'Yes', 'None', 'Yes', 'None', 'Good', 3, 'Usually', 'Extremely', 'Definitely', 'Field workers would benefit from direct mobile notifications.'),
+    (1, 'Vikram Malhotra', 'Visitor', 'Yes', 'None', 'None', 'No', 'None', 'Yes', 'None', 'Good', 4, 'Usually', 'Extremely', 'Probably', 'Campus is very clean, signage and lighting are good.'),
+    (1, 'Ananya Iyer', 'Student', 'Mostly', 'A Few', 'Minor', 'Yes', 'None', 'Yes', 'None', 'Good', 4, 'Usually', 'Extremely', 'Definitely', 'Road near the sports pavilion needs speed breakers and light inspection.'),
+    (1, 'Suresh Babu', 'Staff', 'No', 'Many', 'Severe', 'Yes', 'None', 'Yes', 'None', 'Good', 2, 'Rarely', 'Extremely', 'Definitely', 'Streetlight pole 06 near sports ground needs lamp replacement.'),
+    (1, 'Neha Gupta', 'Student', 'Yes', 'None', 'None', 'No', 'None', 'Yes', 'None', 'Good', 5, 'Always', 'Extremely', 'Definitely', 'Great to see automated infrastructure tracking implemented.'),
+    (1, 'Arjun Nair', 'Student', 'Mostly', 'A Few', 'Minor', 'No', 'None', 'Yes', 'None', 'Good', 4, 'Usually', 'Very', 'Definitely', 'Adding streetlights directly from the map is super convenient!')
+]
+
+def seed_database_tables(cursor, ph='?'):
+    """
+    Populates relational database tables with demonstration data for Streetlights and Roads.
+    """
+    cursor.executemany(
+        f"INSERT INTO users (id, name, email, password_hash, role, phone, department) VALUES ({ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph});",
+        DEMO_USERS
+    )
+    cursor.executemany(
+        f"INSERT INTO surveys (id, title, description, is_active) VALUES ({ph}, {ph}, {ph}, {ph});",
+        DEMO_SURVEYS
+    )
+    cursor.executemany(
+        f"INSERT INTO assets (id, asset_tag, asset_type, name, location, latitude, longitude, health_score, condition_status, age_years, previous_failures, complaint_count, maintenance_count, last_inspection, next_maintenance) VALUES ({ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph});",
+        DEMO_ASSETS
+    )
+    cursor.executemany(
+        f"INSERT INTO streetlights (asset_id, pole_number, wattage, power_status, light_status, lumens) VALUES ({ph}, {ph}, {ph}, {ph}, {ph}, {ph});",
+        DEMO_STREETLIGHTS
+    )
+    cursor.executemany(
+        f"INSERT INTO roads (asset_id, road_name, length_km, surface_type, pothole_count, crack_severity, road_condition, priority) VALUES ({ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph});",
+        DEMO_ROADS
+    )
+    cursor.executemany(
+        f"INSERT INTO maintenance (id, maintenance_code, asset_id, problem, priority, assigned_staff_id, created_date, due_date, status, notes) VALUES ({ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph});",
+        DEMO_MAINTENANCE
+    )
+    cursor.executemany(
+        f"INSERT INTO alerts (id, asset_id, alert_type, problem, risk_level, recommended_action, status, created_at) VALUES ({ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph});",
+        DEMO_ALERTS
+    )
+    cursor.executemany(
+        f"INSERT INTO survey_responses (survey_id, respondent_name, respondent_role, streetlights_working, streetlights_flickering, roads_potholes, roads_maintenance_needed, water_leakage_observed, water_supply_regular, drainage_blocked, drainage_flow_ok, maintenance_satisfaction, maintenance_timely, ai_monitoring_useful, ai_would_use, comments) VALUES ({ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph});",
+        DEMO_SURVEY_RESPONSES
+    )
+
+def init_sqlite_database():
+    """
+    Initializes the local SQLite database schema and inserts all demo datasets.
+    
+    How it works:
+    1. Connects to `campus_maintenance.db` (or creates it if it doesn't exist).
+    2. Drops any existing tables to allow a clean reset without dirty remnants.
+    3. Executes the multi-table SQLite DDL schema script (11 relational tables with constraints).
+    4. Calls `seed_database_tables(cursor, ph='?')` to populate all demo records.
+    5. Commits the transaction and closes the database connection.
+    """
+    db_path = Config.SQLITE_DB_PATH
+    print(f"[*] Initializing local SQLite database at: {db_path}")
+    
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA foreign_keys = OFF;")
+    
+    tables = [
+        'ai_predictions', 'survey_responses', 'surveys', 'alerts',
+        'maintenance', 'drainage', 'water_pipelines', 'roads',
+        'streetlights', 'assets', 'users'
+    ]
+    for table in tables:
+        cursor.execute(f"DROP TABLE IF EXISTS {table};")
+        
+    schema_script = """
+    CREATE TABLE users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        email TEXT UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,
+        role TEXT NOT NULL DEFAULT 'Viewer',
+        phone TEXT,
+        department TEXT DEFAULT 'Campus Estate Office',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE assets (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        asset_tag TEXT UNIQUE NOT NULL,
+        asset_type TEXT NOT NULL,
+        name TEXT NOT NULL,
+        location TEXT NOT NULL,
+        latitude REAL NOT NULL,
+        longitude REAL NOT NULL,
+        health_score INTEGER NOT NULL DEFAULT 100,
+        condition_status TEXT NOT NULL DEFAULT 'Good',
+        age_years INTEGER NOT NULL DEFAULT 1,
+        previous_failures INTEGER NOT NULL DEFAULT 0,
+        complaint_count INTEGER NOT NULL DEFAULT 0,
+        maintenance_count INTEGER NOT NULL DEFAULT 0,
+        last_inspection TEXT,
+        next_maintenance TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE streetlights (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        asset_id INTEGER NOT NULL UNIQUE,
+        pole_number TEXT NOT NULL,
+        wattage INTEGER DEFAULT 70,
+        power_status TEXT DEFAULT 'ON',
+        light_status TEXT DEFAULT 'Working',
+        lumens INTEGER DEFAULT 6500,
+        FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE roads (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        asset_id INTEGER NOT NULL UNIQUE,
+        road_name TEXT NOT NULL,
+        length_km REAL DEFAULT 1.0,
+        surface_type TEXT DEFAULT 'Asphalt',
+        pothole_count INTEGER DEFAULT 0,
+        crack_severity TEXT DEFAULT 'None',
+        road_condition TEXT DEFAULT 'Good',
+        priority TEXT DEFAULT 'Medium',
+        FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE water_pipelines (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        asset_id INTEGER NOT NULL UNIQUE,
+        pipeline_code TEXT NOT NULL,
+        length_km REAL DEFAULT 0.5,
+        pipe_material TEXT DEFAULT 'HDPE',
+        leak_status TEXT DEFAULT 'Normal',
+        water_flow_rate REAL DEFAULT 45.0,
+        pressure_psi REAL DEFAULT 55.0,
+        FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE drainage (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        asset_id INTEGER NOT NULL UNIQUE,
+        drain_code TEXT NOT NULL,
+        drain_type TEXT DEFAULT 'Storm Water',
+        flow_status TEXT DEFAULT 'Normal',
+        blockage_level TEXT DEFAULT 'None',
+        stagnation_risk TEXT DEFAULT 'Low',
+        FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE maintenance (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        maintenance_code TEXT UNIQUE NOT NULL,
+        asset_id INTEGER NOT NULL,
+        problem TEXT NOT NULL,
+        priority TEXT DEFAULT 'Medium',
+        assigned_staff_id INTEGER,
+        created_date TEXT NOT NULL,
+        due_date TEXT,
+        status TEXT DEFAULT 'Pending',
+        notes TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE CASCADE,
+        FOREIGN KEY (assigned_staff_id) REFERENCES users(id) ON DELETE SET NULL
+    );
+
+    CREATE TABLE alerts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        asset_id INTEGER NOT NULL,
+        alert_type TEXT NOT NULL,
+        problem TEXT NOT NULL,
+        risk_level TEXT NOT NULL,
+        recommended_action TEXT NOT NULL,
+        status TEXT DEFAULT 'Pending',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE surveys (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL,
+        description TEXT,
+        is_active INTEGER DEFAULT 1,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE survey_responses (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        survey_id INTEGER DEFAULT 1,
+        respondent_name TEXT,
+        respondent_role TEXT DEFAULT 'Student',
+        streetlights_working TEXT DEFAULT 'Yes',
+        streetlights_flickering TEXT DEFAULT 'None',
+        roads_potholes TEXT DEFAULT 'None',
+        roads_maintenance_needed TEXT DEFAULT 'No',
+        water_leakage_observed TEXT DEFAULT 'None',
+        water_supply_regular TEXT DEFAULT 'Yes',
+        drainage_blocked TEXT DEFAULT 'None',
+        drainage_flow_ok TEXT DEFAULT 'Good',
+        maintenance_satisfaction INTEGER DEFAULT 4,
+        maintenance_timely TEXT DEFAULT 'Usually',
+        ai_monitoring_useful TEXT DEFAULT 'Extremely',
+        ai_would_use TEXT DEFAULT 'Definitely',
+        comments TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (survey_id) REFERENCES surveys(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE ai_predictions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        asset_id INTEGER NOT NULL,
+        health_score INTEGER NOT NULL,
+        failure_probability REAL NOT NULL,
+        risk_level TEXT NOT NULL,
+        predicted_failure_days INTEGER NOT NULL,
+        recommended_window TEXT NOT NULL,
+        features_json TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE CASCADE
+    );
+    """
+    cursor.executescript(schema_script)
+    cursor.execute("PRAGMA foreign_keys = ON;")
+    
+    print("[*] Inserting demo assets, users, maintenance records, and survey responses...")
+    seed_database_tables(cursor, ph='?')
+    conn.commit()
+    print("[+] SQLite database successfully initialized with 34 assets (22 Streetlights, 12 Roads), 11 maintenance tasks, 10 alerts, and 12 surveys!")
+
+def init_mysql_database():
+    """
+    Initializes the MySQL database schema and seeds demo data on a running MySQL server.
+    
+    How it works:
+    1. Connects to the MySQL host (default: localhost:3306) using credentials in Config.
+    2. Executes `CREATE DATABASE IF NOT EXISTS campus_maintenance`.
+    3. Reads and runs table creation statements from `database.sql`.
+    4. Calls `seed_database_tables(cursor, ph='%s')` with MySQL placeholders to populate demo data.
+    5. Commits the transaction and closes the connection.
+    """
+    import mysql.connector
+    print(f"[*] Connecting to MySQL server at {Config.DB_HOST}:{Config.DB_PORT}...")
+    conn = mysql.connector.connect(
+        host=Config.DB_HOST,
+        port=Config.DB_PORT,
+        user=Config.DB_USER,
+        password=Config.DB_PASSWORD
+    )
+    cursor = conn.cursor()
+    cursor.execute(f"CREATE DATABASE IF NOT EXISTS {Config.DB_NAME};")
+    cursor.execute(f"USE {Config.DB_NAME};")
+    
+    # Execute full DDL from database.sql
+    sql_file = Path(__file__).parent / 'database.sql'
+    with open(sql_file, 'r', encoding='utf-8') as f:
+        sql_content = f.read()
+        
+    # Execute DDL statements
+    for stmt in sql_content.split(';'):
+        stmt = stmt.strip()
+        if stmt and not stmt.lower().startswith('insert into'):
+            try:
+                cursor.execute(stmt)
+            except Exception as e:
+                pass
+                
+    # Seed tables with %s placeholders
+    seed_database_tables(cursor, ph='%s')
+    conn.commit()
+    cursor.close()
+    conn.close()
+    print("[+] MySQL database successfully initialized and seeded with demo data!")
+
+def main():
+    """
+    Main CLI entry point for database initialization.
+    
+    How it works:
+    1. Checks for `--sqlite` command-line argument to force local SQLite mode.
+    2. Probes MySQL availability using `database.check_mysql_connection()`.
+    3. If MySQL is live, initializes MySQL via `init_mysql_database()`.
+    4. If MySQL is unreachable, informs the user and initializes the local zero-config
+       SQLite fallback database so the web app can run without manual server setup.
+    """
+    if '--sqlite' in sys.argv:
+        init_sqlite_database()
+        return
+
+    mysql_ok = database.check_mysql_connection()
+    if mysql_ok:
+        try:
+            init_mysql_database()
+            print("[+] Configured for MySQL operations.")
+        except Exception as e:
+            print(f"[-] MySQL initialization failed: {e}. Defaulting to SQLite.")
+            init_sqlite_database()
+    else:
+        print("[!] MySQL server not reachable on localhost:3306.")
+        print("[*] Automatically initializing local SQLite fallback database...")
+        init_sqlite_database()
+        print("\nNote: When you are ready to connect to MySQL (e.g., via XAMPP or MySQL Server):")
+        print("  1. Ensure MySQL service is running on port 3306")
+        print("  2. Check credentials in .env")
+        print("  3. Run: python init_db.py")
+
+if __name__ == '__main__':
+    main()
